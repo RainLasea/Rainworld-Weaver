@@ -2,7 +2,7 @@
 using System.Reflection;
 using UnityEngine;
 
-namespace Weaver
+namespace Weaver.Mouse
 {
     public static class MouseAimSystem
     {
@@ -12,6 +12,31 @@ namespace Weaver
         private static bool mouseAimEnabled = false;
         private static Player currentPlayer;
         private static int currentPlayerNumber = 0;
+
+        public static RoomCamera GetCurrentCamera() => currentCamera;
+
+        public static Vector2 GetAimDirection(Player player)
+        {
+            var cam = GetCurrentCamera();
+            Vector2 aimVector;
+
+            if (cam != null)
+            {
+                Vector2 mouseWorldPos = new Vector2(Futile.mousePosition.x + cam.pos.x, Futile.mousePosition.y + cam.pos.y);
+                aimVector = mouseWorldPos - player.mainBodyChunk.pos;
+            }
+            else
+            {
+                aimVector = player.bodyChunks[0].vel.magnitude > 0.5f
+                    ? player.bodyChunks[0].vel
+                    : new Vector2(player.input[0].x, player.input[0].y);
+            }
+
+            if (aimVector.magnitude < 0.1f)
+                aimVector = Vector2.right * player.flipDirection;
+
+            return aimVector.normalized;
+        }
 
         public static void Initialize()
         {
@@ -38,18 +63,13 @@ namespace Weaver
         {
             mouseAimEnabled = enabled;
             currentPlayer = player;
-            if (player != null && player.playerState != null)
-            {
+            if (player?.playerState != null)
                 currentPlayerNumber = player.playerState.playerNumber;
-            }
         }
 
-        public static bool IsMouseAimEnabled()
-        {
-            return mouseAimEnabled && currentPlayer != null;
-        }
+        public static bool IsMouseAimEnabled() => mouseAimEnabled && currentPlayer != null;
 
-        private static void Weapon_Thrown(On.Weapon.orig_Thrown orig, Weapon weapon, Creature thrownBy, Vector2 thrownPos, System.Nullable<Vector2> firstFrameTraceFromPos, IntVector2 throwDir, float frc, bool eu)
+        private static void Weapon_Thrown(On.Weapon.orig_Thrown orig, Weapon weapon, Creature thrownBy, Vector2 thrownPos, Vector2? firstFrameTraceFromPos, IntVector2 throwDir, float frc, bool eu)
         {
             if (mouseAimEnabled && thrownBy is Player && thrownBy == currentPlayer)
             {
@@ -61,20 +81,12 @@ namespace Weaver
                 weapon.firstChunk.MoveFromOutsideMyUpdate(eu, thrownPos);
 
                 Vector2 mouseWorldPos = new Vector2(Futile.mousePosition.x + currentCamera.pos.x, Futile.mousePosition.y + currentCamera.pos.y);
-                Vector2 aimVector = mouseWorldPos - thrownPos;
-                aimVector = Vector2.ClampMagnitude(aimVector, 0.03f) * 10f;
+                Vector2 aimVector = Vector2.ClampMagnitude(mouseWorldPos - thrownPos, 0.03f) * 10f;
 
                 Vector2 normalizedAim = aimVector.normalized;
-                IntVector2 computedThrowDir;
-
-                if (Mathf.Abs(normalizedAim.x) > Mathf.Abs(normalizedAim.y))
-                {
-                    computedThrowDir = new IntVector2(normalizedAim.x > 0 ? 1 : -1, 0);
-                }
-                else
-                {
-                    computedThrowDir = new IntVector2(0, normalizedAim.y > 0 ? 1 : -1);
-                }
+                IntVector2 computedThrowDir = Mathf.Abs(normalizedAim.x) > Mathf.Abs(normalizedAim.y)
+                    ? new IntVector2(normalizedAim.x > 0 ? 1 : -1, 0)
+                    : new IntVector2(0, normalizedAim.y > 0 ? 1 : -1);
 
                 weaponThrowDirField.SetValue(weapon, computedThrowDir);
 
@@ -84,17 +96,8 @@ namespace Weaver
                     bodyChunk.vel = aimVector * 160f;
                 }
 
-                weapon.setRotation = new Vector2?(aimVector);
-
-                if (frc >= 1f)
-                {
-                    weapon.overrideExitThrownSpeed = 0f;
-                }
-                else
-                {
-                    weapon.overrideExitThrownSpeed = Mathf.Min(weapon.exitThrownModeSpeed, frc * 20f);
-                }
-
+                weapon.setRotation = aimVector;
+                weapon.overrideExitThrownSpeed = frc >= 1f ? 0f : Mathf.Min(weapon.exitThrownModeSpeed, frc * 20f);
                 weapon.ChangeMode(Weapon.Mode.Thrown);
                 weapon.rotationSpeed = 0f;
                 weapon.meleeHitChunk = null;
@@ -114,14 +117,10 @@ namespace Weaver
                 bool inGame = Custom.rainWorld.processManager.currentMainLoop is RainWorldGame;
 
                 if (inGame && Input.GetKey(KeyCode.Mouse1) && playerNumber == currentPlayerNumber)
-                {
                     inputPackage.pckp = true;
-                }
 
                 if (inGame && Input.GetKey(KeyCode.Mouse0) && playerNumber == currentPlayerNumber)
-                {
                     inputPackage.thrw = true;
-                }
             }
 
             return inputPackage;
